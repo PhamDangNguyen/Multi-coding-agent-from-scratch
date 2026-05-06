@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  github-mcp:
+    image: ghcr.io/github/github-mcp-server
+    container_name: github-mcp
+    stdin_open: true # tương đương -i
+    tty: false # MCP không cần TTY
+    environment:
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_TOOLSETS=all
+    restart: always

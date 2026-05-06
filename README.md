@@ -1,6 +1,16 @@
-# Mutil agent from scratch 
-This repository builds a multi-agent system step by step in order to solve problems that a single agent typically faces.
-# Proposed Architecture
+# Mutil agent from scratch overview
+This repository builds a multi-agent system step by step in order to solve problems that a single agent typically faces.  
+First, you need to install the full repository and its submodules using the command:  
+```bash
+git clone --recurse-submodules https://github.com/PhamDangNguyen/Multi-agent-from-scratch.git
+```
+
+
+## Proposed Architecture  
+
+<Details>  
+<summary>Repo Architecture Structure</summary>
+
 ```bash
 multi-agent-system/
 │
@@ -10,9 +20,11 @@ multi-agent-system/
 │   ├── feedback.py             # self-reflection / critic loop
 │   └── state.py                # global task state
 │
-├── logging/                    # logging setting 
+├── log_set/                    # logging setting 
 │
-├── mcp/                        # mcp setup   
+├── mcp/                        # mcp setup  
+│
+├── skill/   
 │
 ├── llm/                        # LLM provider init 
 │   ├── provider         
@@ -31,10 +43,7 @@ multi-agent-system/
 │   ├── message.py              # message passing
 │   └── capability.py           # agent capabilities 
 │
-├── tools/                      # common tools
-│   ├── web_search.py
-│   ├── code_executor.py
-│   └── db.py
+├── tools                      # common tools
 │
 ├── memory/                     # memory system
 │   ├── short_term.py
@@ -73,8 +82,36 @@ multi-agent-system/
 ├── main.py
 └── README.md
 ```
+</details>
+
+<Details>  
+<summary>Target flow</summary>
+
 - The target flow for building an agentic AI is as follows:  
 ![Agentic flow](imgs/1.jpeg)
+</details>
+
+## Agents detail
+### Planner Agent
+Refer: [Git ai-agents-for-beginners](https://github.com/microsoft/ai-agents-for-beginners/blob/main/07-planning-design/README.md).  
+- This agent must divide the main task into specific tasks and distribute them to sub-agents through an orchestrator.
+
+
+### Bash Agent
+Refer: [NVIDIA Nemotron Bash Agent](https://developer.nvidia.com/blog/create-your-own-bash-computer-use-agent-with-nvidia-nemotron-in-one-hour/).  
+- The key part of the main task is to implement command-line operations that allow users to read or remove files and folders.
+### Coding Agent 
+
+
 # Prequisite
 ## Environment Setup 
-- Install [UV](https://docs.astral.sh/uv/getting-started/installation/) or [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install/overview) to create environments for this project. For now, I choose uv for its convenience.
+- Install [UV](https://docs.astral.sh/uv/getting-started/installation/) or [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install/overview) to create environments for this project. For now, I choose uv for its convenience.  
+
+
+## Database setup 
+**a. Qdrant DB**  
+- This is the core database, which stores the agents' core knowledge base for retrieval.
+```bash
+cd container/qdrant
+docker compose up --build -d
+```
