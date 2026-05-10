@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from schemas.llm.llm_message import BaseMessage
 
@@ -16,6 +16,8 @@ class BaseLLMClient(ABC):
     async def generate(
         self,
         messages: list[BaseMessage],
+        tools: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> str:
         """Generate text response from messages"""
         pass
@@ -24,6 +26,8 @@ class BaseLLMClient(ABC):
     async def stream_generate(
         self,
         messages: list[BaseMessage],
+        tools: Optional[Dict[str, Any]] = None,
+        **kwargs
     ):
         """Stream text response from messages"""
         pass

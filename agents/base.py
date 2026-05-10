@@ -15,11 +15,14 @@ class BaseAgent(Generic[InputT, OutputT]):
     agent_name: Optional[str] = None
     agent_description: Optional[str] = None
 
-    async def run(self, task: InputT, context: Optional[Dict[str, Any]] = None) -> OutputT:
+    async def run(self, task: InputT, tools: Optional[Dict[str, Any]] = None) -> OutputT:
         raise NotImplementedError()
 
     async def build_sys_prompt(self, system_prompt: Optional[str] = None) -> str:
         raise NotImplementedError()
+    
+    async def update_system_prompt(self, update_prompt: Optional[str] = None) -> str:
+        raise NotImplementedError()    
 
     def subscribe(self, registry: Dict[str, "BaseAgent"]):
         """Register this agent instance into `registry`.

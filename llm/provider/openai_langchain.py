@@ -1,8 +1,9 @@
 from ..base import BaseLLMClient, BaseMessage
 from langchain_openai import ChatOpenAI
 from schemas.llm.llm_response import LLMResponse, TokenUsage, ToolCall
-from typing import Optional
-
+from typing import Any, Optional, Dict
+from log_set import AppLogger
+logger = AppLogger(__name__)
 class OpenAIClientLangChain(BaseLLMClient):
     """GPT OpenAI LLM Client using LangChain"""
     def __init__(self, api_key: str, model: str = "gpt-4o-mini", temperature: float = 0.7, max_tokens: Optional[int] = None, max_retries: int = 2):
@@ -26,7 +27,7 @@ class OpenAIClientLangChain(BaseLLMClient):
             content=msg.content,
             model=response_metadata.get("model_name"),
             provider=response_metadata.get("model_provider"),
-            chunk_state= "last" if (response_metadata.get("finish_reason")=="stop" or getattr(msg, "chunk_position")=="last") else "continue",
+            chunk_state= "last" if (response_metadata.get("finish_reason")=="stop") else "continue",
             id=getattr(msg, "id", None),
 
             usage=TokenUsage(
@@ -50,18 +51,26 @@ class OpenAIClientLangChain(BaseLLMClient):
     async def generate(
         self,
         messages: list[BaseMessage],
+        tools: Optional[Dict[str, Any]] = None
     ) -> str:
         """Generate text response from OpenAI"""
         message_normalized = self._convert_messages(messages)
-        response =  self.client.invoke(message_normalized)
+        client = self.client
+        if tools:
+            client = self.client.bind_tools(tools=tools, tool_choice="auto")
+        response = client.invoke(message_normalized)
         return self.build_response(response)
     
     async def stream_generate(
         self,
-        messages: list[BaseMessage]
+        messages: list[BaseMessage],
+        tools: Optional[Dict[str, Any]] = None
     ):
         message_normalized = self._convert_messages(messages)
+        client = self.client
+        if tools:
+            client = self.client.bind_tools(tools=tools, tool_choice="auto")
 
-        async for chunk in self.client.astream(message_normalized):
+        async for chunk in client.astream(message_normalized):
             if chunk:
                 yield self.build_response(chunk)

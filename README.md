@@ -112,6 +112,6 @@ Refer: [NVIDIA Nemotron Bash Agent](https://developer.nvidia.com/blog/create-you
 **a. Qdrant DB**  
 - This is the core database, which stores the agents' core knowledge base for retrieval.
 ```bash
-cd container/qdrant
+cd container/database/qdrant
 docker compose up --build -d
 ```

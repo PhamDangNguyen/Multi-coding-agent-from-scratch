@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional, Any
 from ..base import BaseLLMClient, BaseMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from schemas.llm.llm_response import LLMResponse, TokenUsage, ToolCall
@@ -51,18 +51,28 @@ class GeminiClientLangChain(BaseLLMClient):
     async def generate(
         self,
         messages: list[BaseMessage],
+        tools: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> str:
         """Generate text response from Gemini"""
         message_normalized = self._convert_messages(messages)
-        response =  self.client.invoke(message_normalized)
+        client = self.client
+        if tools:
+            client = self.client.bind_tools(tools=tools, tool_choice="auto")
+        response = client.invoke(message_normalized)
         return self.build_response(response)
     
     async def stream_generate(
         self,
-        messages: list[BaseMessage]
+        messages: list[BaseMessage],
+        tools: Optional[Dict[str, Any]] = None,
+        **kwargs
     ):
         message_normalized = self._convert_messages(messages)
+        client = self.client
+        if tools:
+            client = self.client.bind_tools(tools=tools, tool_choice="auto")
 
-        async for chunk in self.client.astream(message_normalized):
+        async for chunk in client.astream(message_normalized):
             if chunk:
                 yield self.build_response(chunk)

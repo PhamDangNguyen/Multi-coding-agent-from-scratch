@@ -1,81 +1,41 @@
-import subprocess
-import json
-import os
-from dotenv import load_dotenv
+# client.py
 
-load_dotenv()
+import asyncio
 
-def test_mcp_list_tools():
-    cmd = [
-        "docker", "run", "-i", "--rm",
-        "-e", f"GITHUB_PERSONAL_ACCESS_TOKEN={os.getenv('GITHUB_TOKEN')}",
-        "ghcr.io/github/github-mcp-server"
-    ]
+from mcp import ClientSession
+from mcp.client.stdio import stdio_client
+from mcp.client.stdio import StdioServerParameters
 
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True,
-        bufsize=1
+
+async def main():
+
+    server_params = StdioServerParameters(
+        command="python",
+        args=["main.py"]
     )
 
-    def send(req):
-        proc.stdin.write(json.dumps(req) + "\n")
-        proc.stdin.flush()
+    async with stdio_client(server_params) as (read, write):
 
-    def recv():
-        while True:
-            line = proc.stdout.readline()
-            if not line:
-                raise RuntimeError("MCP died")
-            try:
-                return json.loads(line)
-            except:
-                continue
+        async with ClientSession(read, write) as session:
 
-    # 1. initialize
-    send({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "test", "version": "1.0"}
-        }
-    })
-    recv()  # bỏ qua init response
+            # init MCP connection
+            await session.initialize()
 
-    # 2. initialized
-    send({
-        "jsonrpc": "2.0",
-        "method": "initialized",
-        "params": {}
-    })
+            # list available tools
+            tools = await session.list_tools()
 
-    # 3. tools/list
-    send({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list"
-    })
+            print("TOOLS:")
+            print(tools)
 
-    res = recv()
-    return res
+            # call tool
+            result = await session.call_tool(
+                "read_file",
+                {
+                    "path": "/home/dangnguyen/Side_project/Multi-agent-from-scratch/README.md"
+                }
+            )
 
+            # print(result)
 
 if __name__ == "__main__":
-    res = test_mcp_list_tools()
-    tools = res["result"]["tools"]
-
-    simple_tools = [
-        {
-            "name": t["name"],
-            "description": t.get("description"),
-            "params": t.get("inputSchema", {}).get("properties", {})
-        }
-        for t in tools
-    ]
-
-    print(json.dumps(simple_tools, indent=2))
+    asyncio.run(main()) 
