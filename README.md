@@ -37,18 +37,11 @@ multi-agent-system/
 │   ├── retrieval_agent.py
 │   └── citation_agent.py
 │
-├── protocol/                   # multi-agent protocol
-│   ├── registry.py             # discovery - agent subscription 
-│   ├── dispatcher.py           # deliver task to each agent
-│   ├── message.py              # message passing
-│   └── capability.py           # agent capabilities 
-│
 ├── tools                      # common tools
 │
 ├── memory/                     # memory system
 │   ├── short_term.py
 │   ├── long_term.py
-│   └── vector_store.py
 │
 ├── prompts/                    # prompt
 │   ├── orchestrator/

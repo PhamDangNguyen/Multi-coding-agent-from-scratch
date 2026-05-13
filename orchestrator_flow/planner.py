@@ -7,11 +7,11 @@ from typing import List, Optional
 from schemas.llm.llm_message import BaseMessage
 from llm import OpenAIClientLangChain, GeminiClientLangChain
 from agents.base import BaseAgent
-from agents import Agent_farm
 from skill import Skill_loader
 from prompts import load_prompt
 from dotenv import load_dotenv
 from schemas.agents.planner_response import PlannerResponse
+import re
 load_dotenv()
 
 from log_set import AppLogger
@@ -19,10 +19,13 @@ logger = AppLogger(__name__)
 
 class AgentPlanner(BaseAgent[str, PlannerResponse]):
     """Agent planner that takes a user task and returns a list of tasks with assigned agents"""
-    def __init__(self, llm: OpenAIClientLangChain|GeminiClientLangChain):
+    agent_name = "AgentPlanner"
+    agent_description = "Break down user request into smaller tasks, assign to suitable agents, and define dependencies and recommended skills for each task."
+    def __init__(self, llm: OpenAIClientLangChain|GeminiClientLangChain, agent_farm: dict[str, BaseAgent]):
         self.llm = llm
         self.system_prompt_base = load_prompt("llm_systems/planner.md")
         self.message_history: List[BaseMessage] = []  
+        self.agent_farm = agent_farm
         self.message_history.append(self.build_sys_prompt())
 
     def build_sys_prompt(self) -> BaseMessage:
@@ -30,7 +33,7 @@ class AgentPlanner(BaseAgent[str, PlannerResponse]):
         {self.system_prompt_base}
 
         Available agents:
-        {Agent_farm}
+        {self.agent_farm}
 
         Available skills to analyze for each task:
         {Skill_loader}
@@ -65,6 +68,16 @@ class AgentPlanner(BaseAgent[str, PlannerResponse]):
             self.message_history[0].content = self.message_history[0].content + "\n\n" + update_prompt 
        
     async def run(self, task: str) -> PlannerResponse:
+
+        def extract_json(content: str):
+            content = content.strip()
+
+            # Remove markdown code fence if present
+            fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL)
+            if fence_match:
+                content = fence_match.group(1).strip()
+
+            return json.loads(content)
         
         prompt = f"""
             User want to do this task:
@@ -77,8 +90,8 @@ class AgentPlanner(BaseAgent[str, PlannerResponse]):
         res = await self.llm.generate(self.message_history)
         if res is not None:
             logger.log("INFO", f"Planner LLM generated susscessfully!!")
-
-        return PlannerResponse(Response=json.loads(res.content))
+    
+        return PlannerResponse(Response=extract_json(res.content))
 
     
 if __name__ == "__main__":
@@ -88,5 +101,5 @@ if __name__ == "__main__":
     api_key = os.getenv("OPENAI_API")
     model = os.getenv("OPENAI_MODEL")
     planner = AgentPlanner(OpenAIClientLangChain(api_key=api_key, model=model))
-    res = asyncio.run(planner.run("create file a.txt this is summary file from b.txt file"))
+    res = asyncio.run(planner.run("Xây dựng service đơn giản để quản lý công việc hàng ngày, bao gồm tạo, đọc, cập nhật, xóa công việc bằng Python"))
     print(res)

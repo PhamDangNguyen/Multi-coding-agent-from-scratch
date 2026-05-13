@@ -16,5 +16,12 @@ Skill_loader = [
         "description":"Use this skill whenever the user wants to do anything with DOCX files. This includes reading or extracting text/tables from DOCX files, creating new DOCX files, editing existing DOCX files, and converting DOCX files to other formats. If the user mentions a .docx file or asks to produce one, use this skill.",
         "folder_path": "skill/details/docx",
         "fullcontent_file": "skill/details/docx/SKILL.md"
-    }
+    },
+    {
+        "name":"unit_test",
+        "description":"This skill covers how to write, organize, and run tests for Python using `pytest` — the most popular testing framework in the Python ecosystem. Applies to unit tests, integration tests, fixtures, parametrize, mocking, and coverage.",
+        "folder_path": "skill/details/unit_test",
+        "fullcontent_file": "skill/details/unit_test/SKILL.md"
+    },
+
 ]

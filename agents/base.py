@@ -24,6 +24,17 @@ class BaseAgent(Generic[InputT, OutputT]):
     async def update_system_prompt(self, update_prompt: Optional[str] = None) -> str:
         raise NotImplementedError()    
 
+    def reset_message_history(self, keep_system: bool = True):
+        if not keep_system:
+            self.message_history = []
+            return
+
+        self.message_history = [
+            message
+            for message in self.message_history
+            if getattr(message, "role", None) == "system"
+        ]
+
     def subscribe(self, registry: Dict[str, "BaseAgent"]):
         """Register this agent instance into `registry`.
 
