@@ -108,3 +108,10 @@ Refer: [NVIDIA Nemotron Bash Agent](https://developer.nvidia.com/blog/create-you
 cd container/database/qdrant
 docker compose up --build -d
 ```
+
+## Running 
+- Running following this command:
+```bash
+uv sync
+uv run main.py
+```

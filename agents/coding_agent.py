@@ -27,6 +27,7 @@ class CodingAgent(BaseAgent[str, Dict[str, Any]]):
 	async def run(self, task: str, tools: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 		prompt = f"""User want to do this task: {task}"""
 		self.message_history.append(BaseMessage(role="user", content=prompt))
+		await self.compress_message_history()
 		res = await self.llm.generate(self.message_history, tools=tools)
 		if res is not None:
 			logger.log("INFO",f"{self.agent_name} generate sussessfully !!")

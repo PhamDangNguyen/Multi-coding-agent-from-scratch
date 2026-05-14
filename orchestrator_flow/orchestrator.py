@@ -227,9 +227,8 @@ class MultiAgentOrchestrator:
         error = task.get("error")
         if status != "completed":
             return f"Task failed.\n Agent: {agent_name}\n Error: {error}\n Result: {result}"
-        summarizer = self._agent_classes.get("AgentPlanner")
-        if summarizer is None:
-            return self._truncate(result, 4000)
+        summarizer = self._agent_classes.get("SummaryAgent")
+        summarizer.reset_message_history(keep_system=True)
         prompt = f"""
         You are a memory summarizer for a multi-agent coding system.
         Summarize the completed task result into a concise handoff memory for downstream agents.
