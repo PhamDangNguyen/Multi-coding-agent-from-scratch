@@ -1,239 +1,292 @@
-"""
-React Multi-Agent Orchestrator – LangGraph
+"""Production-oriented LangGraph orchestrator for the multi-agent flow.
 
-Architecture:
+Flow:
+    user query -> planner -> dependency-aware executor -> final answer
 
-query
-  ↓
-planner
-  ↓
-executor
-  ↓
-END
-
-planner:
-- split query into structured tasks
-
-executor:
-- dispatch task to ReactAgent runtime
-
-react agent:
-- think
-- choose tool
-- execute tool
-- observe
-- repeat
-- final answer
+The orchestrator keeps the public `run(query)` API stable while adding:
+- lazy app/LLM initialization
+- planner output validation
+- dependency-aware task execution
+- per-task agent isolation
+- runtime timeout/error handling
+- shared memory updates between tasks
 """
 
+from __future__ import annotations
+
+import asyncio
 import os
 import sys
-import asyncio
-
+from collections.abc import Awaitable, Mapping, Sequence
 from pathlib import Path
-from rich import print
+from typing import Any
+
 from dotenv import load_dotenv
+from langgraph.graph import END, StateGraph
 
-from langgraph.graph import StateGraph, END
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-from orchestrator_flow.planner import AgentPlanner
-from agents import Agent_farm
-from tools import TOOLS_DICT
-from schemas.orchestrator.state_graph import (Task,State)
-from llm.provider.openai_langchain import OpenAIClientLangChain
+from log_set import AppLogger
+from schemas.orchestrator.state_graph import State, Task
+from schemas.orchestrator.config import OrchestratorConfig
+from agents import load_default_agent_instances, AgentClass, build_llm
 from orchestrator_flow.react_agent_runtime import ReactAgentRuntime
+from tools import TOOLS_DICT, TOOLS_INSTANCE
+from rich import print
 
 load_dotenv()
-LLM = OpenAIClientLangChain(api_key=os.getenv("OPENAI_API"), model=os.getenv("OPENAI_MODEL"))
 
-# Agent declareation
-PLANNER = AgentPlanner(LLM)
+logger = AppLogger(__name__)
 
-# Planner Node
-async def planner_node(state: State):
+class MultiAgentOrchestrator:
+    def __init__(
+        self,
+        config: OrchestratorConfig | None = None,
+        agent_classes: Mapping[str, AgentClass] | None = None,
+    ):
+        self.config = config
+        self._agent_classes = dict(agent_classes)
+        self._llm_client = build_llm(config)
 
-    print("\n[Planner] Creating plan...")
+    async def planner_node(self, state: State) -> State:
+        query = state.get("query")
+        shared_memory = dict(state.get("shared_memory"))
 
-    res = await PLANNER.run(state["query"])
+        if not query:
+            raise ValueError("Query is empty")
 
-    raw_plan = res.Response
+        planner = self._agent_classes.get("AgentPlanner")
 
-    tasks = []
-
-    for idx, step in enumerate(raw_plan):
-
-        task = Task(
-            id=f"task_{idx + 1}",
-            task=step["task"],
-            agent=step["agent"],
-            status="pending",
-            result=None,
-            error=None,
+        response = await self._with_timeout(
+            planner.run(query),
+            self.config.planner_timeout_seconds,
         )
+        print("Raw planner response:", response)
+        raw_plan = getattr(response, "Response", response)
+        tasks = self._normalize_tasks(raw_plan)
 
-        tasks.append(task)
+        logger.info(f"Planner created {len(tasks)} task(s)")
 
-    print(f"[Planner] Total Tasks: {len(tasks)}")
+        return {
+            **state,
+            "tasks": tasks,
+            "shared_memory": shared_memory,
+            "final_answer": "",
+        }
 
-    return {
-        **state,
-        "tasks": tasks,
-    }
+    async def executor_node(self, state: State) -> State:
+        tasks = list(state.get("tasks"))
+        shared_memory = dict(state.get("shared_memory"))
 
-# ─────────────────────────────────────────────────────────────
-# Executor Node
-# ─────────────────────────────────────────────────────────────
+        while True:
+            pending = [task for task in tasks if task.get("status") == "pending"]
+            if not pending:
+                break
 
-async def executor_node(state: State):
+            progress = False
+            task_by_id = {task["id"]: task for task in tasks}
 
-    tasks = state["tasks"]
+            for task in pending:
+                blocked_by = self._failed_dependencies(task, task_by_id)
+                if blocked_by:
+                    task["status"] = "failed"
+                    task["error"] = "Skipped because dependency failed: " + ", ".join(blocked_by)
+                    self._remember_task(shared_memory, task)
+                    progress = True
+                    continue
 
-    shared_memory = state["shared_memory"]
+                if not self._dependencies_completed(task, task_by_id):
+                    continue
 
-    for task in tasks:
+                progress = True
+                await self._execute_task(task, shared_memory)
 
+                if self.config.stop_on_failure and task.get("status") == "failed":
+                    self._fail_pending_tasks(tasks, "Stopped because a previous task failed")
+                    break
+
+            if self.config.stop_on_failure and any(task.get("status") == "failed" for task in tasks):
+                break
+
+            if not progress:
+                self._fail_pending_tasks(tasks, "Dependency cycle or unresolved dependency")
+                break
+
+        final_answer = self._format_final_answer(tasks)
+        return {
+            **state,
+            "tasks": tasks,
+            "shared_memory": shared_memory,
+            "final_answer": final_answer,
+        }
+
+    async def _execute_task(self, task: Task, shared_memory: dict[str, Any]) -> None:
+        task_id = task["id"]
+        agent_name = task["agent"]
+        task_text = task["task"]
+
+        logger.info(f"Executing {task_id} with {agent_name}")
         task["status"] = "running"
 
-        task_id = task["id"]
-        task_text = task["task"]
-        agent_name = task["agent"]
+        agent = self._agent_classes.get(agent_name)
+        agent.reset_message_history(keep_system=True)
+        runtime = ReactAgentRuntime(agent=agent, tools_des=TOOLS_DICT, tools_instance=TOOLS_INSTANCE, max_iterations=self.config.max_iterations)
+        result = await self._with_timeout(runtime.run(task=task_text, shared_memory=shared_memory), self.config.task_timeout_seconds)
+        runtime_status = result.get("status")
 
-        print("\n" + "=" * 80)
-        print(f"[Executor] {task_id}")
-        print(f"Task  : {task_text}")
-        print(f"Agent : {agent_name}")
-
-        # ─────────────────────────────────────────────
-        # Get Agent
-        # ─────────────────────────────────────────────
-
-        agent = Agent_farm.get(agent_name)
-
-        if not agent:
-
+        if runtime_status == "completed":
+            task["status"] = "completed"
+            task["result"] = result.get("result")
+            task["error"] = None
+        else:
             task["status"] = "failed"
-            task["error"] = f"Agent not found: {agent_name}"
+            task["result"] = result.get("result")
+            task["error"] = result.get("error") or f"Runtime status: {runtime_status}"
+        
+        task["summary"] = await self._summarize_task_result(task)
+        self._remember_task(shared_memory, task)
 
-            continue
+    def _normalize_tasks(self, raw_plan: Any) -> list[Task]:
+        if raw_plan is None:
+            raise ValueError("Planner returned no plan")
+        tasks: list[Task] = []
+        for _, item in enumerate(raw_plan, start=1):
+            task_id, task_text, agent_name, depends_on, recommended_skills = item.id, item.task, item.agent, item.depends_on, item.recommended_skills
+            task: Task = {
+                "id": task_id,
+                "task": task_text,
+                "agent": agent_name,
+                "depends_on": depends_on,
+                "skill": recommended_skills,
+                "status": "pending",
+                "result": None,
+                "error": None,
+            }
 
-        # ─────────────────────────────────────────────
-        # React Runtime
-        # ─────────────────────────────────────────────
+            tasks.append(task)
+        return tasks
 
-        runtime = ReactAgentRuntime(
-            agent=agent,
-            tools=TOOLS_DICT,
-        )
+    def _failed_dependencies(self, task: Task, task_by_id: Mapping[str, Task],) -> list[str]:
+        failed: list[str] = []
+        for dep in task.get("depends_on"):
+            dep_task = task_by_id.get(dep)
+            if dep_task and dep_task.get("status") == "failed":
+                failed.append(dep)
+        return failed
 
-        result = await runtime.run(
-            task=task_text,
-            shared_memory=shared_memory,
-        )
+    def _dependencies_completed(self, task: Task, task_by_id: Mapping[str, Task]) -> bool:
+        for dep in task.get("depends_on"):
+            dep_task = task_by_id.get(dep)
+            if not dep_task or dep_task.get("status") != "completed":
+                return False
+        return True
 
-        task["status"] = result["status"]
-        task["result"] = result["result"]
+    def _remember_task(self, shared_memory: dict[str, Any], task: Task) -> None:
+        shared_memory[task["id"]] = {"agent": task.get("agent"), "task": task.get("task"), "status": task.get("status"), "summary": task.get("summary"), "error": task.get("error")}
+        shared_memory["last_task_id"] = task["id"]
 
-        print(f"\n[Done] {task_id}")
+    def _fail_pending_tasks(self, tasks: list[Task], reason: str) -> None:
+        for task in tasks:
+            if task.get("status") == "pending":
+                task["status"] = "failed"
+                task["error"] = reason
 
-    # ─────────────────────────────────────────────────
-    # Final Answer
-    # ─────────────────────────────────────────────────
+    def _format_final_answer(self, tasks: Sequence[Task]) -> str:
+        sections: list[str] = []
+        for task in tasks:
+            status = task.get("status")
+            result = task.get("result")
+            error = task.get("error")
 
-    outputs = []
+            body = result if status == "completed" else error
+            sections.append(
+                "\n".join(
+                    [
+                        f"[{task.get('id')}]",
+                        f"Agent: {task.get('agent')}",
+                        f"Status: {status}",
+                        f"Task: {task.get('task')}",
+                        f"Result: {body}",
+                    ]
+                )
+            )
+        return "\n\n".join(sections)
 
-    for task in tasks:
+    async def _with_timeout(self, awaitable: Awaitable[Any], timeout_seconds: float | None) -> Any:
+        if timeout_seconds is None:
+            return await awaitable
+        return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
 
-        outputs.append(
-            f"""
-[{task['id']}]
+    async def _summarize_task_result(self, task: Task) -> str:
+        agent_name = task.get("agent")
+        task_text = task.get("task")
+        status = task.get("status")
+        result = task.get("result")
+        error = task.get("error")
+        if status != "completed":
+            return f"Task failed.\n Agent: {agent_name}\n Error: {error}\n Result: {result}"
+        summarizer = self._agent_classes.get("SummaryAgent")
+        summarizer.reset_message_history(keep_system=True)
+        prompt = f"""
+        You are a memory summarizer for a multi-agent coding system.
+        Summarize the completed task result into a concise handoff memory for downstream agents.
+        Focus only on actionable facts. Remove verbose logs, repeated tool outputs, and long explanations.
+        Return this structure:
+        ## What was done
+        - ...
+        ## Files/folders created or modified
+        - path — purpose
+        ## Important decisions
+        - ...
+        ## Instructions for next agents
+        - ...
+        ## Risks / notes
+        - ...
+        Agent: {agent_name}
+        Task:
+        {task_text}
+        Raw task result:
+        {result}
+        """
+        response = await self._with_timeout(summarizer.run(prompt),self.config.planner_timeout_seconds)
+        return getattr(response, "content", response)
 
-Task:
-{task['task']}
 
-Agent:
-{task['agent']}
 
-Status:
-{task['status']}
-
-Result:
-{task['result']}
-            """.strip()
-        )
-
-    final_answer = "\n\n".join(outputs)
-
-    return {
-        **state,
-        "tasks": tasks,
-        "final_answer": final_answer,
-    }
-
-# ─────────────────────────────────────────────────────────────
-# Build Graph
-# ─────────────────────────────────────────────────────────────
-
-def build_graph():
+def build_graph(orchestrator: MultiAgentOrchestrator | None = None):
+    orchestrator = orchestrator
 
     graph = StateGraph(State)
-
-    graph.add_node("planner", planner_node)
-
-    graph.add_node("executor", executor_node)
-
+    graph.add_node("planner", orchestrator.planner_node)
+    graph.add_node("executor", orchestrator.executor_node)
     graph.set_entry_point("planner")
-
     graph.add_edge("planner", "executor")
-
     graph.add_edge("executor", END)
-
     return graph.compile()
 
-# ─────────────────────────────────────────────────────────────
-# Singleton App
-# ─────────────────────────────────────────────────────────────
+async def run(query: str, *, orchestrator: MultiAgentOrchestrator | None = None, shared_memory: Mapping[str, Any] | None = None) -> State:
+    if not query or not query.strip():
+        raise ValueError("query must not be empty")
 
-APP = build_graph()
-
-# ─────────────────────────────────────────────────────────────
-# Public API
-# ─────────────────────────────────────────────────────────────
-
-async def run(query: str):
-
-    initial_state = {
-        "query": query,
-
+    initial_state: State = {
+        "query": query.strip(),
         "tasks": [],
-
-        "shared_memory": {},
-
+        "shared_memory": dict(shared_memory or {}),
         "final_answer": "",
     }
 
-    result = await APP.ainvoke(initial_state)
+    graph = build_graph(orchestrator)
+    return await graph.ainvoke(initial_state)
 
-    return result
-
-# ─────────────────────────────────────────────────────────────
-# Test
-# ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    from rich import print
 
-    query = """
-Read README.md
-understand project
-then create hello.py
-with simple hello world
-"""
+    llm_client = build_llm(OrchestratorConfig())
+    orchestrator= MultiAgentOrchestrator(config=OrchestratorConfig(), agent_classes=load_default_agent_instances(llm_client))
+    query = "Trong folder '/home/dangnguyen/Side_project/Multi-agent-from-scratch/code_test', hãy code một API tính cộng 2 số bằng python theo pattern design."
 
-    result = asyncio.run(run(query))
-
-    print("\n" + "=" * 80)
-    print("FINAL RESULT")
-    print("=" * 80)
-
-    print(result["final_answer"])
+    output = asyncio.run(run(query, orchestrator=orchestrator))
+    print(output["final_answer"])

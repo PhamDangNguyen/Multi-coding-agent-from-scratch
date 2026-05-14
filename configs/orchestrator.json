@@ -1,0 +1,9 @@
+{
+    "provider": "openai",
+    "model": "gpt-5.2",
+    "max_iterations_per_agent": 10,
+    "planner_timeout_seconds": 50,
+    "task_timeout_seconds": 200,
+    "max_tasks": 10,
+    "stop_on_failure": false
+}

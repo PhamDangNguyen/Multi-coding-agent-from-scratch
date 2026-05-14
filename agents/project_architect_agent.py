@@ -16,12 +16,17 @@ class ProjectArchitectAgent(BaseAgent[str, Dict[str, Any]]):
 	"""Agent for defining project architecture."""
 
 	agent_name =  "ProjectArchitectAgent"
+
 	agent_description = """
-		Can read file, repo , and system information to design project architecture, including:
-		- Defining module structure and organization
-		- Identifying key components and their interactions
-		- Recommending design patterns and best practices
-		- Providing high-level implementation guidance
+	Inspects real repositories and designs professional project architecture.
+
+	Can read repository structure, configs, dependencies, and source files.
+	If the assigned task requires missing architecture folders, this agent may create
+	scaffolding directories, spec.md files for each new directory, agent.spec.md guidance,
+	__init__.py files, and placeholder files with TODO comments.
+
+	This agent must not implement business logic, API logic, service logic, or tests.
+	Its output is an Architecture Handoff Report for downstream CodingAgent/TestAgent.
 	"""
 	def __init__(self, llm: OpenAIClientLangChain|GeminiClientLangChain):
 		self.llm = llm
@@ -34,7 +39,7 @@ class ProjectArchitectAgent(BaseAgent[str, Dict[str, Any]]):
 		self.message_history.append(BaseMessage(role="user", content=prompt))
 		res = await self.llm.generate(self.message_history, tools=tools)
 		if res is not None:
-			logger.log("INFO",f"ProjectArchitectAgent generate sussessfully !!")
+			logger.log("INFO",f"{self.agent_name} generate sussessfully !!")
 		return res 
 	
 	def update_system_prompt(self, update_prompt: Optional[str] = None) -> None:

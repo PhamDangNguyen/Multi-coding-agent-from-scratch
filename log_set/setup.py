@@ -2,6 +2,7 @@ import logging
 import json
 from typing import Optional, Any
 
+from configs import load_config
 from rich.logging import RichHandler
 
 
@@ -13,23 +14,26 @@ class AppLogger:
         if cls._initialized:
             return
 
+        config = load_config("logging.json")
+        handler_config = config.get("rich_handler", {})
+
         handler = RichHandler(
-            rich_tracebacks=True,
-            markup=True,
-            show_time=True,
-            show_level=True,
-            show_path=False,
+            rich_tracebacks=handler_config.get("rich_tracebacks", True),
+            markup=handler_config.get("markup", True),
+            show_time=handler_config.get("show_time", True),
+            show_level=handler_config.get("show_level", True),
+            show_path=handler_config.get("show_path", False),
         )
 
-        formatter = logging.Formatter("%(message)s")
+        formatter = logging.Formatter(config.get("format", "%(message)s"))
         handler.setFormatter(formatter)
 
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
+        root_logger.setLevel(config.get("level", "INFO"))
         root_logger.addHandler(handler)
 
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("openai").setLevel(logging.WARNING)
+        for logger_name, level in config.get("logger_levels", {}).items():
+            logging.getLogger(logger_name).setLevel(level)
 
         cls._initialized = True
 

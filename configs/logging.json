@@ -1,0 +1,15 @@
+{
+  "level": "INFO",
+  "format": "%(message)s",
+  "rich_handler": {
+    "rich_tracebacks": true,
+    "markup": true,
+    "show_time": true,
+    "show_level": true,
+    "show_path": false
+  },
+  "logger_levels": {
+    "httpx": "WARNING",
+    "openai": "WARNING"
+  }
+}

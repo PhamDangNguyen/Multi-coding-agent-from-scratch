@@ -20,7 +20,7 @@ class Task(TypedDict, total=False):
 
     tool_name: str | None
     
-    skill: list[dict[str, Any]] | None
+    skill: list[str] | None
 
     tool_args: dict[str, Any] | None
 
