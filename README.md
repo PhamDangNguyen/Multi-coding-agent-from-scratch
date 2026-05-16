@@ -109,7 +109,10 @@ cd container/database/qdrant
 docker compose up --build -d
 ```
 
-## Running 
+# Running
+## Add instructions if necessary
+- The [repo instruction](https://github.com/multica-ai/andrej-karpathy-skills) with 131k stars, this repository describes how a single CLAUDE.md file can improve Claude Code’s behavior. It may also apply to Codex and other coding agents. You can research it and use any parts of the file that are useful. 
+## Run service
 - Running following this command:
 ```bash
 uv sync
